@@ -17,7 +17,7 @@ from telegram.utils.helpers import escape_markdown
 
 
 def main():
-    DATE = pd.Timestamp.today(tz='Asia/Kuala_Lumpur').floor('d')
+    DATE = pd.Timestamp.today(tz='Asia/Kuala_Lumpur').floor('d').tz_localize(None)
     CHAT_ID = os.environ.get('CHAT_ID')
     CHAT_ID_LOG = os.environ.get('CHAT_ID_LOG')
     TOKEN = os.environ.get('TOKEN')
