@@ -188,13 +188,15 @@ def get_link_details(link):
     if h2:
         title = h2.text
 
-    content = soup.find('p', {'class': 'mtop10'})
+    content = soup.find('div', {'class': 'doccontent'})
     if content:
-        a = content.find('a', href=True)
-        if a:
-            post = a['href']
-            if post:
-                pdf = get_pdf(post)
+        p = content.find_all('p')[-1]
+        if p:
+            a = p.find('a', href=True)
+            if a:
+                post = a['href']
+                if post:
+                    pdf = get_pdf(post)
 
     return title, post, pdf
 
