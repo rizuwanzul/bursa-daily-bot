@@ -70,22 +70,25 @@ def main():
             # Initialise var to check if message has been sent
             not_sent = True
             if row['Pdf'] != '':
-                response = requests.get(f"https:{urllib.parse.quote(row['Pdf'])}")
-                content_type = response.headers.get('content-type')
+                try:
+                    response = requests.get(f"https:{urllib.parse.quote(row['Pdf'])}")
+                    content_type = response.headers.get('content-type')
 
-                if 'application/pdf' in content_type:
-                    png = generate_photo(response.content)
-                    bot.send_photo(
-                        chat_id=CHAT_ID,
-                        photo=png,
-                        caption=row['Caption'],
-                        parse_mode=telegram.ParseMode.MARKDOWN_V2,
-                        disable_notification=True,
-                        timeout=30
-                    )
-                    not_sent = False
-                    new_report_df.at[index, 'Status'] = 'Sent'
-                    time.sleep(3)
+                    if 'application/pdf' in content_type:
+                        png = generate_photo(response.content)
+                        bot.send_photo(
+                            chat_id=CHAT_ID,
+                            photo=png,
+                            caption=row['Caption'],
+                            parse_mode=telegram.ParseMode.MARKDOWN_V2,
+                            disable_notification=True,
+                            timeout=30
+                        )
+                        not_sent = False
+                        new_report_df.at[index, 'Status'] = 'Sent'
+                        time.sleep(3)
+                except:
+                    pass
 
             if not_sent:
                 bot.send_message(
