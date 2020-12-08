@@ -193,9 +193,9 @@ def get_link_details(link):
 
     content = soup.find('div', {'class': 'doccontent'})
     if content:
-        p = content.find_all('p')[-1]
+        p = content.find_all('p')
         if p:
-            a = p.find('a', href=True)
+            a = p[-1].find('a', href=True)
             if a:
                 post = a['href']
                 if post:
