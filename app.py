@@ -17,7 +17,8 @@ from telegram.utils.helpers import escape_markdown
 
 
 def main():
-    DATE = pd.Timestamp.today(tz='Asia/Kuala_Lumpur').floor('d').tz_localize(None)
+    DATE = pd.Timestamp.today(
+        tz='Asia/Kuala_Lumpur').floor('d').tz_localize(None)
     CHAT_ID = os.environ.get('CHAT_ID')
     CHAT_ID_LOG = os.environ.get('CHAT_ID_LOG')
     TOKEN = os.environ.get('TOKEN')
@@ -41,7 +42,7 @@ def main():
         stocks = latest_df['Stock Name'].unique().tolist()
         if len(latest_df) == 50:
             last_row = latest_df.loc[49, 'Stock Name']
-            cond = stocks_df['Stock Name']>last_row
+            cond = stocks_df['Stock Name'] > last_row
             stocks = stocks + stocks_df[cond]['Stock Name'].tolist()
             stocks = sorted(list(set(stocks)))
 
@@ -50,19 +51,23 @@ def main():
         report_df = pd.concat(appended_df, ignore_index=True)
 
         # Filter latest price
-        is_latest = report_df['Date']>=DATE
+        is_latest = report_df['Date'] >= DATE
         new_report_df = report_df[is_latest].copy().reset_index(drop=True)
-        new_report_df = new_report_df.sort_values(by=['Date', 'Stock Name'], ignore_index=True)
+        new_report_df = new_report_df.sort_values(
+            by=['Date', 'Stock Name'], ignore_index=True)
 
         # Extract details info for price target
-        new_report_df['Title'], new_report_df['Post'], new_report_df['Pdf'] = zip(*new_report_df['Link'].apply(get_link_details))
+        new_report_df['Title'], new_report_df['Post'], new_report_df['Pdf'] = zip(
+            *new_report_df['Link'].apply(get_link_details))
 
         # Add shariah status into dataframe
-        new_report_df = pd.merge(new_report_df, stocks_df, how='left', on='Stock Name')
+        new_report_df = pd.merge(
+            new_report_df, stocks_df, how='left', on='Stock Name')
         new_report_df['Shariah'] = new_report_df['Shariah'].fillna('')
 
         # Generate caption and text message
-        new_report_df['Caption'], new_report_df['Text'] = zip(*new_report_df.apply(generate_caption_text, axis=1))
+        new_report_df['Caption'], new_report_df['Text'] = zip(
+            *new_report_df.apply(generate_caption_text, axis=1))
 
         # Send latest reports to Telegram Channel
         new_report_df['Status'] = ''
@@ -71,7 +76,8 @@ def main():
             not_sent = True
             if row['Pdf'] != '':
                 try:
-                    response = requests.get(f"https:{urllib.parse.quote(row['Pdf'])}")
+                    response = requests.get(
+                        f"https:{urllib.parse.quote(row['Pdf'])}")
                     content_type = response.headers.get('content-type')
 
                     if 'application/pdf' in content_type:
@@ -117,6 +123,7 @@ def main():
                 timeout=30
             )
 
+
 def fetch(url):
     headers = {'User-Agent': 'Mozilla/5.0'}
     response = requests.get(url, headers=headers)
@@ -124,26 +131,34 @@ def fetch(url):
 
     return soup
 
+
 def get_latest_price_target(date):
     headers = {'User-Agent': 'Mozilla/5.0'}
-    response = requests.get('http://klse.i3investor.com/jsp/pt.jsp', headers=headers)
+    response = requests.get(
+        'http://klse.i3investor.com/jsp/pt.jsp', headers=headers)
     df = pd.read_html(response.text, attrs={'class': 'nc'})[0]
 
-    df['Date'] =  pd.to_datetime(df['Date'], format='%d/%m/%Y')
-    df = df[df['Date']>=date]
+    df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
+    df = df[df['Date'] >= date]
 
     return df
 
+
 def get_stocks():
     # Get list of stocks
-    response = requests.get('https://www.bursamarketplace.com/bin/json/stockheatmap.json')
-    stock_df = pd.json_normalize(response.json()['children'])[['name', 'data.shariah']]
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    response = requests.get(
+        'https://www.bursamarketplace.com/bin/json/stockheatmap.json', headers=headers)
+    stock_df = pd.json_normalize(response.json()['children'])[
+        ['name', 'data.shariah']]
     stock_df.columns = ['Stock Name', 'Shariah']
 
     # Get list of reit
-    reit_df = pd.read_html('https://www.isaham.my/sector/reits', attrs={'id': 'myTable'})[0][['Stock']]
+    reit_df = pd.read_html('https://www.isaham.my/sector/reits',
+                           attrs={'id': 'myTable'})[0][['Stock']]
     reit_df.columns = ['Stock Name']
-    reit_df[['Stock Name', 'Shariah']] = reit_df['Stock Name'].str.split(expand=True)
+    reit_df[['Stock Name', 'Shariah']
+            ] = reit_df['Stock Name'].str.split(expand=True)
     di = {None: 'Yes', '[NS]': 'No'}
     reit_df['Shariah'] = reit_df['Shariah'].map(di)
 
@@ -155,8 +170,10 @@ def get_stocks():
 
     return df
 
+
 def get_price_target_by_stock(stock):
-    soup = fetch(f'https://klse.i3investor.com/ptservlet.jsp?sa=pts&q={urllib.parse.quote(stock)}')
+    soup = fetch(
+        f'https://klse.i3investor.com/ptservlet.jsp?sa=pts&q={urllib.parse.quote(stock)}')
     table = soup.find('table', attrs={'class': 'nc'})
     if table:
         if not table.find('span', attrs={'class': 'warn'}):
@@ -182,6 +199,7 @@ def get_price_target_by_stock(stock):
             return df
 
     return None
+
 
 def get_link_details(link):
     soup = fetch(f'https://klse.i3investor.com{link}')
@@ -211,6 +229,7 @@ def get_pdf(post):
         return pdf['data']
 
     return ''
+
 
 def generate_caption_text(row):
     broker_house = {
@@ -247,13 +266,15 @@ def generate_caption_text(row):
         broker = escape_markdown(broker_house[row['Source']], version=2)
     else:
         broker = escape_markdown(row['Source'], version=2)
-    link = escape_markdown(f"https://klse.i3investor.com{row['Link']}", version=2)
+    link = escape_markdown(
+        f"https://klse.i3investor.com{row['Link']}", version=2)
     pdf = escape_markdown(f"https:{urllib.parse.quote(row['Pdf'])}", version=2)
 
     caption = f'*{name} {shariah}*\({call}\); Target: RM{tp}\n[{title}]({pdf}) by {broker} {date}\n\n{link}'
     text = f'*{name} {shariah}*\({call}\); Target: RM{tp}\nResearch report by {broker} {date}\n\n{link}'
 
     return caption, text
+
 
 def generate_photo(content):
     pdf = io.BytesIO(content)
@@ -264,6 +285,7 @@ def generate_photo(content):
     png = io.BytesIO(pix.getPNGData())
 
     return png
+
 
 if __name__ == "__main__":
     main()
