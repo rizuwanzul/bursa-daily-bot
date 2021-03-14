@@ -39,11 +39,11 @@ def main():
         stocks_df = get_stocks()
 
         # If 'all new' i.e. 50 rows of price target, then check individual stocks if any new price target
-        stocks = latest_df['Stock Name'].unique().tolist()
+        stocks = latest_df['Code'].unique().tolist()
         if len(latest_df) == 50:
-            last_row = latest_df.loc[49, 'Stock Name']
-            cond = stocks_df['Stock Name'] > last_row
-            stocks = stocks + stocks_df[cond]['Stock Name'].tolist()
+            last_row = latest_df.loc[49, 'Code']
+            cond = stocks_df['Code'] > last_row
+            stocks = stocks + stocks_df[cond]['Code'].tolist()
             stocks = sorted(list(set(stocks)))
 
         # Load price target for each stock into dataframe
@@ -54,16 +54,18 @@ def main():
         is_latest = report_df['Date'] >= DATE
         new_report_df = report_df[is_latest].copy().reset_index(drop=True)
         new_report_df = new_report_df.sort_values(
-            by=['Date', 'Stock Name'], ignore_index=True)
+            by=['Date', 'Code'], ignore_index=True)
 
         # Extract details info for price target
         new_report_df['Title'], new_report_df['Post'], new_report_df['Pdf'] = zip(
             *new_report_df['Link'].apply(get_link_details))
 
-        # Add shariah status into dataframe
-        new_report_df = pd.merge(
-            new_report_df, stocks_df, how='left', on='Stock Name')
-        new_report_df['Shariah'] = new_report_df['Shariah'].fillna('')
+        # Add columns from stock_df into dataframe
+        new_report_df = new_report_df.merge(stocks_df, how='left', on='Code')
+
+        # Generate potential changes based on last and target price
+        new_report_df['Change'] = new_report_df.apply(
+            lambda x: get_change(x['Last Price'], x['Target Price']), axis=1)
 
         # Generate caption and text message
         new_report_df['Caption'], new_report_df['Text'] = zip(
@@ -137,6 +139,7 @@ def get_latest_price_target(date):
     response = requests.get(
         'http://klse.i3investor.com/jsp/pt.jsp', headers=headers)
     df = pd.read_html(response.text, attrs={'class': 'nc'})[0]
+    df.rename(columns={'Stock Name': 'Code'}, inplace=True)
 
     df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
     df = df[df['Date'] >= date]
@@ -145,35 +148,21 @@ def get_latest_price_target(date):
 
 
 def get_stocks():
-    # Get list of stocks
     headers = {'User-Agent': 'Mozilla/5.0'}
-    response = requests.get(
-        'https://www.bursamarketplace.com/bin/json/stockheatmap.json', headers=headers)
-    stock_df = pd.json_normalize(response.json()['children'])[
-        ['name', 'data.shariah']]
-    stock_df.columns = ['Stock Name', 'Shariah']
-
-    # Get list of reit
-    reit_df = pd.read_html('https://www.isaham.my/sector/reits',
-                           attrs={'id': 'myTable'})[0][['Stock']]
-    reit_df.columns = ['Stock Name']
-    reit_df[['Stock Name', 'Shariah']
-            ] = reit_df['Stock Name'].str.split(expand=True)
-    di = {None: 'Yes', '[NS]': 'No'}
-    reit_df['Shariah'] = reit_df['Shariah'].map(di)
-
-    # Combine into one df
-    df = pd.concat([stock_df, reit_df], ignore_index=True)
-    df.sort_values(by=['Stock Name'], inplace=True, ignore_index=True)
-    di = {'Yes': '', 'No': '[NS] '}
-    df['Shariah'] = df['Shariah'].map(di)
+    data = {'screener_lists': ['all-stock'], 'screener_option_lists': [],
+            'criteria_lists': {}, 'column_lists': ["s_symbol"], 'is_default_column': True}
+    response = requests.post(
+        'https://www.isaham.my/iscanner', headers=headers, json=data)
+    df = pd.DataFrame(response.json()['result'], columns=response.json()[
+                      'header'])[['Stock', 'Last Price']]
+    df['Code'] = df['Stock'].str.replace(' [NS]', '', regex=False)
 
     return df
 
 
 def get_price_target_by_stock(stock):
     soup = fetch(
-        f'https://klse.i3investor.com/ptservlet.jsp?sa=pts&q={urllib.parse.quote(stock)}')
+        f"https://klse.i3investor.com/ptservlet.jsp?sa=pts&q={urllib.parse.quote(stock)}")
     table = soup.find('table', attrs={'class': 'nc'})
     if table:
         if not table.find('span', attrs={'class': 'warn'}):
@@ -193,7 +182,9 @@ def get_price_target_by_stock(stock):
 
             columns.insert(7, 'Link')
             df = pd.DataFrame(data=records, columns=columns)
-            df.insert(0, 'Stock Name', stock)
+            df.insert(0, 'Code', stock)
+            df[['Open Price', 'Target Price']] = df[['Open Price', 'Target Price']].apply(
+                pd.to_numeric, errors='coerce')
             df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
 
             return df
@@ -202,7 +193,7 @@ def get_price_target_by_stock(stock):
 
 
 def get_link_details(link):
-    soup = fetch(f'https://klse.i3investor.com{link}')
+    soup = fetch(f"https://klse.i3investor.com{link}")
     post, title, pdf = [''] * 3
 
     h2 = soup.find('h2')
@@ -223,12 +214,39 @@ def get_link_details(link):
 
 
 def get_pdf(post):
-    soup = fetch(f'https://klse.i3investor.com{post}')
+    soup = fetch(f"https://klse.i3investor.com{post}")
     pdf = soup.find('object')
     if pdf:
         return pdf['data']
 
     return ''
+
+
+def format_price(value):
+    if round(abs(value)*1000, 0) % 10 == 0:
+        str_value = f"{value:.2f}"
+    else:
+        str_value = f"{value:.3f}"
+
+    return str_value
+
+
+def get_change(current, target):
+    try:
+        diff = target-current
+        if current != 0:
+            percent = diff/current
+        else:
+            percent = 0
+
+        if diff < 0:
+            change = f"({format_price(diff)}, {percent:.1%})"
+        else:
+            change = f"(+{format_price(diff)}, +{percent:.1%})"
+    except:
+        change = ""
+
+    return change
 
 
 def generate_caption_text(row):
@@ -255,10 +273,10 @@ def generate_caption_text(row):
         'UOBKayHian': 'UOB Kay Hian'
     }
 
-    name = escape_markdown(row['Stock Name'], version=2)
-    shariah = escape_markdown(row['Shariah'], version=2)
-    tp = escape_markdown(row['Target Price'], version=2)
-    change = escape_markdown(row['Upside/Downside'], version=2)
+    name = escape_markdown(row['Stock'], version=2)
+    last = escape_markdown(f"{format_price(row['Last Price'])}", version=2)
+    tp = escape_markdown(f"{format_price(row['Target Price'])}", version=2)
+    change = escape_markdown(row['Change'], version=2)
     call = escape_markdown(row['Price Call'].title(), version=2)
     title = escape_markdown(row['Title'], version=2)
     date = escape_markdown(row['Date'].strftime('(%d/%m/%Y)'), version=2)
@@ -270,8 +288,8 @@ def generate_caption_text(row):
         f"https://klse.i3investor.com{row['Link']}", version=2)
     pdf = escape_markdown(f"https:{urllib.parse.quote(row['Pdf'])}", version=2)
 
-    caption = f'*{name} {shariah}*\({call}\); Target: RM{tp}\n[{title}]({pdf}) by {broker} {date}\n\n{link}'
-    text = f'*{name} {shariah}*\({call}\); Target: RM{tp}\nResearch report by {broker} {date}\n\n{link}'
+    caption = f"*{name}* \({call}\) Last: RM{last}\nTarget: RM{tp} {change}\n[{title}]({pdf}) by {broker} {date}\n\n{link}"
+    text = f"*{name}* \({call}\) Last: RM{last}\nTarget: RM{tp} {change}\nResearch report by {broker} {date}\n\n{link}"
 
     return caption, text
 
